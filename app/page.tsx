@@ -1,14 +1,17 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import FundingTable from "@/components/FundingTable";
 import SearchBar from "@/components/SearchBar";
 import Filters from "@/components/Filters";
-import { getFundingRounds } from "@/lib/supabase";
+import { getFundingRounds, getFilterOptions } from "@/lib/supabase";
 import type { FundingRound } from "@/lib/types";
 
 /** Number of items to load per page */
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 100;
+
+/** Debounce delay for search in milliseconds */
+const SEARCH_DEBOUNCE_MS = 300;
 
 /**
  * Sort funding rounds by field and direction
@@ -43,60 +46,6 @@ function sortData(
     if (aValue > bValue) return direction === "asc" ? 1 : -1;
     return 0;
   });
-}
-
-/**
- * Filter funding rounds by search query and filters
- */
-function filterData(
-  items: FundingRound[],
-  searchQuery: string,
-  roundFilter: string | null,
-  industryFilter: string | null
-): FundingRound[] {
-  return items.filter((item) => {
-    // Search filter - matches company name or product description
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      const matchesCompany = item.company_name.toLowerCase().includes(query);
-      const matchesDescription = item.product_description
-        ?.toLowerCase()
-        .includes(query);
-      if (!matchesCompany && !matchesDescription) {
-        return false;
-      }
-    }
-
-    // Round filter
-    if (roundFilter && item.funding_round !== roundFilter) {
-      return false;
-    }
-
-    // Industry filter
-    if (industryFilter && item.industry !== industryFilter) {
-      return false;
-    }
-
-    return true;
-  });
-}
-
-/**
- * Extract unique values from data for filter dropdowns
- */
-function extractUniqueValues(data: FundingRound[]) {
-  const rounds = new Set<string>();
-  const industries = new Set<string>();
-
-  data.forEach((item) => {
-    if (item.funding_round) rounds.add(item.funding_round);
-    if (item.industry) industries.add(item.industry);
-  });
-
-  return {
-    rounds: Array.from(rounds).sort(),
-    industries: Array.from(industries).sort(),
-  };
 }
 
 /**
@@ -221,47 +170,85 @@ function EmptyState() {
 
 export default function Home() {
   // Data state
-  const [allData, setAllData] = useState<FundingRound[]>([]);
+  const [data, setData] = useState<FundingRound[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
 
+  // Filter options (fetched once from DB)
+  const [filterOptions, setFilterOptions] = useState<{
+    rounds: string[];
+    industries: string[];
+  }>({ rounds: [], industries: [] });
+
   // UI state
   const [sortField, setSortField] = useState<string>("published_at");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [roundFilter, setRoundFilter] = useState<string | null>(null);
   const [industryFilter, setIndustryFilter] = useState<string | null>(null);
 
+  // Ref for debounce timer
+  const searchDebounceRef = useRef<NodeJS.Timeout | null>(null);
+
   /**
-   * Fetch initial data from Supabase
+   * Fetch filter options from Supabase (once on mount)
    */
-  const fetchInitialData = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-
+  const fetchFilterOptions = useCallback(async () => {
     try {
-      const data = await getFundingRounds({
-        limit: PAGE_SIZE,
-        offset: 0,
-        orderBy: "published_at",
-        ascending: false,
-      });
-
-      setAllData(data);
-      setHasMore(data.length === PAGE_SIZE);
+      const options = await getFilterOptions();
+      setFilterOptions(options);
     } catch (err) {
-      console.error("Error fetching funding rounds:", err);
-      setError(
-        err instanceof Error
-          ? err.message
-          : "An unexpected error occurred while loading data."
-      );
-    } finally {
-      setIsLoading(false);
+      console.error("Error fetching filter options:", err);
+      // Non-critical error - filters will just be empty
     }
   }, []);
+
+  /**
+   * Fetch data from Supabase with current search/filter params
+   */
+  const fetchData = useCallback(
+    async (reset: boolean = false) => {
+      if (reset) {
+        setIsLoading(true);
+      }
+      setError(null);
+
+      try {
+        const newData = await getFundingRounds({
+          limit: PAGE_SIZE,
+          offset: reset ? 0 : data.length,
+          orderBy: "published_at",
+          ascending: false,
+          search: debouncedSearch || undefined,
+          roundFilter: roundFilter || undefined,
+          industryFilter: industryFilter || undefined,
+        });
+
+        if (reset) {
+          setData(newData);
+        } else {
+          setData((prev) => [...prev, ...newData]);
+        }
+        setHasMore(newData.length === PAGE_SIZE);
+      } catch (err) {
+        console.error("Error fetching funding rounds:", err);
+        if (reset) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "An unexpected error occurred while loading data."
+          );
+        }
+      } finally {
+        setIsLoading(false);
+        setIsLoadingMore(false);
+      }
+    },
+    [data.length, debouncedSearch, roundFilter, industryFilter]
+  );
 
   /**
    * Load more data (pagination)
@@ -270,42 +257,43 @@ export default function Home() {
     if (isLoadingMore || !hasMore) return;
 
     setIsLoadingMore(true);
+    fetchData(false);
+  }, [fetchData, hasMore, isLoadingMore]);
 
-    try {
-      const data = await getFundingRounds({
-        limit: PAGE_SIZE,
-        offset: allData.length,
-        orderBy: "published_at",
-        ascending: false,
-      });
-
-      if (data.length === 0) {
-        setHasMore(false);
-      } else {
-        setAllData((prev) => [...prev, ...data]);
-        setHasMore(data.length === PAGE_SIZE);
-      }
-    } catch (err) {
-      console.error("Error loading more funding rounds:", err);
-      // Don't set error state - just log it and let user try again
-    } finally {
-      setIsLoadingMore(false);
-    }
-  }, [allData.length, hasMore, isLoadingMore]);
-
-  // Fetch data on mount
+  // Fetch filter options on mount
   useEffect(() => {
-    fetchInitialData();
-  }, [fetchInitialData]);
+    fetchFilterOptions();
+  }, [fetchFilterOptions]);
 
-  // Extract unique filter options from loaded data
-  const filterOptions = useMemo(() => extractUniqueValues(allData), [allData]);
+  // Fetch data on mount and when filters change
+  useEffect(() => {
+    fetchData(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch, roundFilter, industryFilter]);
 
-  // Apply filters and sorting to data
-  const displayData = useMemo(() => {
-    const filtered = filterData(allData, searchQuery, roundFilter, industryFilter);
-    return sortData(filtered, sortField, sortDirection);
-  }, [allData, searchQuery, roundFilter, industryFilter, sortField, sortDirection]);
+  // Debounce search input
+  useEffect(() => {
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+    }
+
+    searchDebounceRef.current = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      if (searchDebounceRef.current) {
+        clearTimeout(searchDebounceRef.current);
+      }
+    };
+  }, [searchQuery]);
+
+  // Sort data client-side (server handles filtering, client handles sorting)
+  // Memoized to prevent re-sorting on every keystroke
+  const displayData = useMemo(
+    () => sortData(data, sortField, sortDirection),
+    [data, sortField, sortDirection]
+  );
 
   // Handle sort change from table
   const handleSort = useCallback((field: string, direction: "asc" | "desc") => {
@@ -313,7 +301,7 @@ export default function Home() {
     setSortDirection(direction);
   }, []);
 
-  // Handle search change (debounced from SearchBar)
+  // Handle search change
   const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);
   }, []);
@@ -371,14 +359,14 @@ export default function Home() {
             </p>
           </header>
 
-          <ErrorMessage message={error} onRetry={fetchInitialData} />
+          <ErrorMessage message={error} onRetry={() => fetchData(true)} />
         </main>
       </div>
     );
   }
 
   // Render empty state (no data in database yet)
-  if (allData.length === 0) {
+  if (data.length === 0 && !debouncedSearch && !roundFilter && !industryFilter) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
         <main className="container mx-auto px-4 py-8">
@@ -427,20 +415,50 @@ export default function Home() {
 
         {/* Results count */}
         <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
-          {displayData.length === allData.length
-            ? `Showing all ${displayData.length} funding rounds`
-            : `Showing ${displayData.length} of ${allData.length} funding rounds`}
+          {debouncedSearch || roundFilter || industryFilter
+            ? `Found ${displayData.length} funding rounds${hasMore ? "+" : ""}`
+            : `Showing ${displayData.length} funding rounds${hasMore ? "+" : ""}`}
         </div>
 
-        <FundingTable
-          data={displayData}
-          onSort={handleSort}
-          sortField={sortField}
-          sortDirection={sortDirection}
-        />
+        {/* No results message when filters are active */}
+        {displayData.length === 0 && (debouncedSearch || roundFilter || industryFilter) && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+            <div className="px-6 py-16 text-center">
+              <svg
+                className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
+                />
+              </svg>
+              <h3 className="mt-4 text-lg font-medium text-gray-900 dark:text-white">
+                No results found
+              </h3>
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                Try adjusting your search or filter criteria.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {displayData.length > 0 && (
+          <FundingTable
+            data={displayData}
+            onSort={handleSort}
+            sortField={sortField}
+            sortDirection={sortDirection}
+          />
+        )}
 
         {/* Load More button */}
-        {hasMore && displayData.length === allData.length && (
+        {hasMore && (
           <div className="mt-6 flex justify-center">
             <button
               onClick={loadMore}
