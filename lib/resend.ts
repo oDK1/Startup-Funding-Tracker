@@ -90,7 +90,7 @@ ${divider}
 
   body += `${divider}
 
-View all: https://your-app.vercel.app
+View all: ${process.env.NEXT_PUBLIC_APP_URL || 'https://your-app.vercel.app'}
 
 ${divider}`;
 
