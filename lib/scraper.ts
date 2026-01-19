@@ -8,6 +8,7 @@
  */
 
 import Parser from "rss-parser";
+import * as cheerio from "cheerio";
 import type { RSSItem, RSSSource } from "./types";
 
 // Re-export for backward compatibility
@@ -145,13 +146,162 @@ export async function fetchAllRSSFeeds(): Promise<RSSItem[]> {
 }
 
 /**
- * Extract article content from URL
- * TODO: Implement with cheerio and @mozilla/readability
+ * Common selectors for article content on news sites
+ * Ordered by specificity - more specific selectors first
+ */
+const ARTICLE_SELECTORS = [
+  "article",
+  ".article-content",
+  ".article-body",
+  ".post-content",
+  ".entry-content",
+  ".story-content",
+  ".content-body",
+  '[role="main"]',
+  "main",
+  ".main-content",
+];
+
+/**
+ * Elements to remove before extracting text
+ * These typically contain non-article content
+ */
+const ELEMENTS_TO_REMOVE = [
+  "script",
+  "style",
+  "nav",
+  "footer",
+  "aside",
+  "header",
+  ".advertisement",
+  ".ad",
+  ".ads",
+  ".sidebar",
+  ".comments",
+  ".comment-section",
+  ".social-share",
+  ".share-buttons",
+  ".related-posts",
+  ".related-articles",
+  ".newsletter-signup",
+  ".subscription-box",
+  "iframe",
+  "noscript",
+  "svg",
+  "figure figcaption",
+];
+
+/**
+ * Extract article content from a URL
+ *
+ * Fetches the HTML page, parses it with cheerio, removes unwanted elements,
+ * and extracts the main article text content.
+ *
+ * @param url - The article URL to fetch and extract content from
+ * @returns The extracted article text, or empty string on error
  */
 export async function extractArticleContent(url: string): Promise<string> {
-  // TODO: Implement article content extraction
-  console.log(`Extracting content from: ${url}`);
-  return "";
+  console.log(`[Extractor] Extracting content from: ${url}`);
+
+  try {
+    // Create an AbortController for timeout handling
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+
+    // Fetch the HTML page
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+      },
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      console.error(
+        `[Extractor] HTTP error fetching ${url}: ${response.status} ${response.statusText}`
+      );
+      return "";
+    }
+
+    const html = await response.text();
+
+    // Parse HTML with cheerio
+    const $ = cheerio.load(html);
+
+    // Remove unwanted elements
+    ELEMENTS_TO_REMOVE.forEach((selector) => {
+      $(selector).remove();
+    });
+
+    // Try to find article content using common selectors
+    let articleContent = "";
+
+    for (const selector of ARTICLE_SELECTORS) {
+      const element = $(selector);
+      if (element.length > 0) {
+        // Get the text content of the first matching element
+        articleContent = element.first().text();
+        if (articleContent.trim().length > 100) {
+          // Found substantial content
+          console.log(
+            `[Extractor] Found content using selector: ${selector}`
+          );
+          break;
+        }
+      }
+    }
+
+    // Fallback: if no article selector worked, try body content
+    if (articleContent.trim().length < 100) {
+      console.log(`[Extractor] Using body fallback for: ${url}`);
+      articleContent = $("body").text();
+    }
+
+    // Clean up the text
+    const cleanedContent = cleanText(articleContent);
+
+    console.log(
+      `[Extractor] Extracted ${cleanedContent.length} characters from: ${url}`
+    );
+    return cleanedContent;
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.name === "AbortError") {
+        console.error(`[Extractor] Timeout fetching ${url}`);
+      } else {
+        console.error(`[Extractor] Error extracting from ${url}: ${error.message}`);
+      }
+    } else {
+      console.error(`[Extractor] Unknown error extracting from ${url}`);
+    }
+    return "";
+  }
+}
+
+/**
+ * Clean extracted text content
+ *
+ * - Normalizes whitespace (multiple spaces/newlines to single space)
+ * - Trims leading/trailing whitespace
+ * - Removes excessive blank lines
+ *
+ * @param text - Raw extracted text
+ * @returns Cleaned text
+ */
+function cleanText(text: string): string {
+  return (
+    text
+      // Replace multiple whitespace characters (including newlines, tabs) with a single space
+      .replace(/\s+/g, " ")
+      // Trim leading and trailing whitespace
+      .trim()
+  );
 }
 
 /**
