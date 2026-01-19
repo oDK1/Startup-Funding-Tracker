@@ -7,8 +7,13 @@
  * - Fetch and extract article content using cheerio/readability
  */
 
+import type { RSSItem, RSSSource } from "./types";
+
+// Re-export for backward compatibility
+export type { RSSItem };
+
 // Data sources (RSS feeds)
-export const RSS_SOURCES = [
+export const RSS_SOURCES: RSSSource[] = [
   {
     name: "TechCrunch",
     url: "https://techcrunch.com/category/startups/feed/",
@@ -30,14 +35,6 @@ export const RSS_SOURCES = [
     url: "https://techfundingnews.com/feed/",
   },
 ];
-
-export type RSSItem = {
-  title: string;
-  link: string;
-  pubDate: string;
-  content?: string;
-  source: string;
-};
 
 /**
  * Fetch and parse RSS feed

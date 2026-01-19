@@ -4,7 +4,7 @@
  * Sends formatted email digest with today's funding rounds
  */
 
-import type { FundingRound } from "./supabase";
+import type { FundingRound } from "./types";
 
 // Environment variables needed:
 // - RESEND_API_KEY

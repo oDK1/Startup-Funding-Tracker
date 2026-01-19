@@ -5,18 +5,13 @@
  * funding information (company, amount, round, investors, etc.)
  */
 
+import type { ExtractedFunding } from "./types";
+
+// Re-export for backward compatibility
+export type { ExtractedFunding };
+
 // Environment variable needed:
 // - ANTHROPIC_API_KEY
-
-export type ExtractedFunding = {
-  company_name: string;
-  funding_amount: number | null;
-  funding_round: string | null;
-  investors: string[];
-  lead_investor: string | null;
-  product_description: string;
-  industry: string | null;
-};
 
 /**
  * Extraction prompt for Claude
