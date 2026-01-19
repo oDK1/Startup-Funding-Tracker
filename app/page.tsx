@@ -81,6 +81,28 @@ const PLACEHOLDER_DATA: FundingRound[] = [
   },
 ];
 
+// Available filter options
+const ROUND_OPTIONS = [
+  "Pre-Seed",
+  "Seed",
+  "Series A",
+  "Series B",
+  "Series C",
+  "Series D",
+  "Series D+",
+];
+
+const INDUSTRY_OPTIONS = [
+  "AI/ML",
+  "FinTech",
+  "Healthcare",
+  "CleanTech",
+  "Security",
+  "SaaS",
+  "E-commerce",
+  "Other",
+];
+
 /**
  * Sort funding rounds by field and direction
  */
@@ -116,15 +138,60 @@ function sortData(
   });
 }
 
+/**
+ * Filter funding rounds by search query and filters
+ */
+function filterData(
+  items: FundingRound[],
+  searchQuery: string,
+  roundFilter: string | null,
+  industryFilter: string | null
+): FundingRound[] {
+  return items.filter((item) => {
+    // Search filter - matches company name or product description
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      const matchesCompany = item.company_name.toLowerCase().includes(query);
+      const matchesDescription = item.product_description
+        ?.toLowerCase()
+        .includes(query);
+      if (!matchesCompany && !matchesDescription) {
+        return false;
+      }
+    }
+
+    // Round filter
+    if (roundFilter && item.funding_round !== roundFilter) {
+      return false;
+    }
+
+    // Industry filter
+    if (industryFilter && item.industry !== industryFilter) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
 export default function Home() {
   const [sortField, setSortField] = useState<string>("published_at");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [roundFilter, setRoundFilter] = useState<string | null>(null);
+  const [industryFilter, setIndustryFilter] = useState<string | null>(null);
 
   // TODO: Replace with Supabase fetch
-  // For now, use placeholder data and compute sorted data
+  // For now, use placeholder data and compute filtered + sorted data
   const data = useMemo(() => {
-    return sortData(PLACEHOLDER_DATA, sortField, sortDirection);
-  }, [sortField, sortDirection]);
+    const filtered = filterData(
+      PLACEHOLDER_DATA,
+      searchQuery,
+      roundFilter,
+      industryFilter
+    );
+    return sortData(filtered, sortField, sortDirection);
+  }, [searchQuery, roundFilter, industryFilter, sortField, sortDirection]);
 
   // Handle sort change from table
   const handleSort = useCallback(
@@ -134,6 +201,20 @@ export default function Home() {
     },
     []
   );
+
+  // Handle search change (debounced from SearchBar)
+  const handleSearchChange = useCallback((value: string) => {
+    setSearchQuery(value);
+  }, []);
+
+  // Handle filter changes
+  const handleRoundChange = useCallback((value: string | null) => {
+    setRoundFilter(value);
+  }, []);
+
+  const handleIndustryChange = useCallback((value: string | null) => {
+    setIndustryFilter(value);
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -148,8 +229,26 @@ export default function Home() {
         </header>
 
         <div className="flex flex-col sm:flex-row gap-4 mb-6">
-          <SearchBar />
-          <Filters />
+          <SearchBar
+            value={searchQuery}
+            onChange={handleSearchChange}
+            placeholder="Search companies or descriptions..."
+          />
+          <Filters
+            roundFilter={roundFilter}
+            industryFilter={industryFilter}
+            onRoundChange={handleRoundChange}
+            onIndustryChange={handleIndustryChange}
+            rounds={ROUND_OPTIONS}
+            industries={INDUSTRY_OPTIONS}
+          />
+        </div>
+
+        {/* Results count */}
+        <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+          {data.length === PLACEHOLDER_DATA.length
+            ? `Showing all ${data.length} funding rounds`
+            : `Showing ${data.length} of ${PLACEHOLDER_DATA.length} funding rounds`}
         </div>
 
         <FundingTable
