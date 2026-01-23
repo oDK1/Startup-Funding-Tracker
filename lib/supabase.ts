@@ -179,13 +179,22 @@ export async function getFilterOptions(): Promise<{
   ]);
 
   // Extract unique values
+  // Exclude public offerings and growth rounds from filter options
+  const excludedRounds = ["ipo", "spac", "direct listing", "secondary offering", "growth", "growth round"];
+
   const rounds = [
     ...new Set(
       roundsData
         .map((r) => r.funding_round)
         .filter(Boolean)
+        .filter((r) => !excludedRounds.includes(r.toLowerCase()))
     ),
-  ].sort();
+  ].sort((a, b) => {
+    // Put "etc." at the bottom
+    if (a.toLowerCase() === "etc.") return 1;
+    if (b.toLowerCase() === "etc.") return -1;
+    return a.localeCompare(b);
+  });
 
   const industries = [
     ...new Set(
