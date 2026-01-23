@@ -180,7 +180,7 @@ export async function getFilterOptions(): Promise<{
 
   // Extract unique values
   // Exclude public offerings and growth rounds from filter options
-  const excludedRounds = ["ipo", "spac", "direct listing", "secondary offering", "growth", "growth round"];
+  const excludedRounds = ["ipo", "spac", "direct listing", "secondary offering", "public offering", "growth", "growth round"];
 
   const rounds = [
     ...new Set(
