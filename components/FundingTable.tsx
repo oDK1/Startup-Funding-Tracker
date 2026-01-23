@@ -296,11 +296,9 @@ export default function FundingTable({
                   {renderInvestorsCell(row)}
                 </td>
 
-                {/* Description - Truncated */}
-                <td className="px-6 py-4 text-gray-600 dark:text-gray-300 max-w-xs">
-                  <span title={row.product_description || undefined}>
-                    {truncateText(row.product_description, 60)}
-                  </span>
+                {/* Description */}
+                <td className="px-6 py-4 text-gray-600 dark:text-gray-300">
+                  {row.product_description || "-"}
                 </td>
 
                 {/* Date */}
