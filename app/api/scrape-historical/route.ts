@@ -16,7 +16,10 @@ import {
  *
  * Query parameters:
  * - startDate: ISO date string (e.g., "2026-01-01") - scrape articles after this date
+ * - startPage: Page number to start scraping from (default 1)
  * - maxPages: Maximum pages to scrape per source (default 10)
+ *
+ * Example: ?startDate=2026-01-01&startPage=10&maxPages=10 to scrape pages 10-19
  */
 
 // Rate limiting delay between requests (1 second)
@@ -275,15 +278,17 @@ function formatAmount(amount: number | null): string {
 async function scrapeArchiveSource(
   source: ArchiveSource,
   startDate: Date,
+  startPage: number,
   maxPages: number,
   result: HistoricalScrapeResult
 ): Promise<void> {
   console.log(`[Historical] Scraping ${source.name} archives...`);
 
-  let page = 1;
+  let page = startPage;
+  const endPage = startPage + maxPages - 1;
   let shouldContinue = true;
 
-  while (shouldContinue && page <= maxPages) {
+  while (shouldContinue && page <= endPage) {
     const pageUrl = source.getPageUrl(page);
     console.log(`[Historical] Fetching ${source.name} page ${page}: ${pageUrl}`);
 
@@ -403,6 +408,7 @@ async function scrapeArchiveSource(
  *
  * Query parameters:
  * - startDate: ISO date string (required, e.g., "2026-01-01")
+ * - startPage: Page number to start from (optional, default 1)
  * - maxPages: Maximum pages per source (optional, default 10)
  */
 export async function GET(request: NextRequest) {
@@ -411,6 +417,7 @@ export async function GET(request: NextRequest) {
   // Parse query parameters
   const searchParams = request.nextUrl.searchParams;
   const startDateParam = searchParams.get("startDate");
+  const startPageParam = searchParams.get("startPage");
   const maxPagesParam = searchParams.get("maxPages");
 
   // Validate startDate
@@ -429,6 +436,15 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const startPage = startPageParam ? parseInt(startPageParam, 10) : 1;
+
+  if (isNaN(startPage) || startPage < 1) {
+    return NextResponse.json(
+      { error: "startPage must be a positive number" },
+      { status: 400 }
+    );
+  }
+
   const maxPages = maxPagesParam
     ? parseInt(maxPagesParam, 10)
     : DEFAULT_MAX_PAGES;
@@ -441,7 +457,7 @@ export async function GET(request: NextRequest) {
   }
 
   console.log(
-    `[Historical] Starting historical scrape from ${startDate.toISOString()}, max ${maxPages} pages per source`
+    `[Historical] Starting historical scrape from ${startDate.toISOString()}, pages ${startPage}-${startPage + maxPages - 1} per source`
   );
 
   const result: HistoricalScrapeResult = {
@@ -461,7 +477,7 @@ export async function GET(request: NextRequest) {
   try {
     // Process each archive source
     for (const source of ARCHIVE_SOURCES) {
-      await scrapeArchiveSource(source, startDate, maxPages, result);
+      await scrapeArchiveSource(source, startDate, startPage, maxPages, result);
     }
 
     result.duration = Date.now() - startTime;

@@ -20,7 +20,11 @@ import {
  */
 
 // Maximum number of items to process per run to avoid timeouts
-const MAX_ITEMS_PER_RUN = 50;
+// Reduced to 10 for Vercel Free tier (60s timeout): 10 items × ~4s = ~40s
+const MAX_ITEMS_PER_RUN = 10;
+
+// Maximum function execution time before stopping (leave buffer for Vercel's 60s limit)
+const FUNCTION_TIMEOUT_MS = 55000;
 
 // Delay between processing items to avoid rate limits (in ms)
 const PROCESSING_DELAY = 500;
@@ -36,6 +40,7 @@ interface ScrapeResult {
   skippedDuplicate: number;
   skippedNotFunding: number;
   errors: number;
+  stoppedEarly: boolean;
   details: {
     added: Array<{ company: string; amount: number | null; source: string }>;
     errors: Array<{ url: string; error: string }>;
@@ -107,6 +112,7 @@ export async function GET(request: NextRequest) {
     skippedDuplicate: 0,
     skippedNotFunding: 0,
     errors: 0,
+    stoppedEarly: false,
     details: {
       added: [],
       errors: [],
@@ -132,7 +138,16 @@ export async function GET(request: NextRequest) {
     console.log(`[Scrape] Processing ${itemsToProcess.length} items (max: ${MAX_ITEMS_PER_RUN})`);
 
     // Step 2: Process each item
+    let stoppedEarly = false;
     for (const item of itemsToProcess) {
+      // Check if approaching timeout
+      const elapsed = Date.now() - startTime;
+      if (elapsed > FUNCTION_TIMEOUT_MS) {
+        console.log(`[Scrape] Approaching timeout (${elapsed}ms), stopping early`);
+        stoppedEarly = true;
+        break;
+      }
+
       result.itemsProcessed++;
 
       try {
@@ -216,7 +231,8 @@ export async function GET(request: NextRequest) {
     }
 
     result.duration = Date.now() - startTime;
-    console.log(`[Scrape] Completed in ${result.duration}ms`);
+    result.stoppedEarly = stoppedEarly;
+    console.log(`[Scrape] Completed in ${result.duration}ms${stoppedEarly ? ' (stopped early due to timeout)' : ''}`);
     console.log(`[Scrape] Summary: ${result.newItemsAdded} added, ${result.skippedDuplicate} duplicates, ${result.skippedNotFunding} not funding, ${result.errors} errors`);
 
     return NextResponse.json(result);
