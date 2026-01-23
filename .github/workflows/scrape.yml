@@ -36,25 +36,26 @@ jobs:
             exit 1
           fi
 
-      - name: Wait before sending digest
-        run: sleep 30
-
-      - name: Trigger email digest
-        run: |
-          echo "Calling: $DIGEST_URL"
-          response=$(curl -s -w "\n%{http_code}" -X GET "$DIGEST_URL" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            --max-time 60)
-
-          http_code=$(echo "$response" | tail -n1)
-          body=$(echo "$response" | sed '$d')
-
-          echo "Response: $body"
-          echo "HTTP Status: $http_code"
-
-          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-            echo "Digest sent successfully"
-          else
-            echo "Digest failed with status $http_code"
-            exit 1
-          fi
+      # Uncomment below to enable email digest
+      # - name: Wait before sending digest
+      #   run: sleep 30
+      #
+      # - name: Trigger email digest
+      #   run: |
+      #     echo "Calling: $DIGEST_URL"
+      #     response=$(curl -s -w "\n%{http_code}" -X GET "$DIGEST_URL" \
+      #       -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+      #       --max-time 60)
+      #
+      #     http_code=$(echo "$response" | tail -n1)
+      #     body=$(echo "$response" | sed '$d')
+      #
+      #     echo "Response: $body"
+      #     echo "HTTP Status: $http_code"
+      #
+      #     if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+      #       echo "Digest sent successfully"
+      #     else
+      #       echo "Digest failed with status $http_code"
+      #       exit 1
+      #     fi
