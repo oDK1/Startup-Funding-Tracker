@@ -144,8 +144,14 @@ Extract funding information from this article. Return JSON:
   "industry": string | null
 }
 
-If this article is NOT about a startup funding round, return null.
-Exclude public offerings (IPO, SPAC, direct listing, secondary offering) - only include private funding rounds.
+IMPORTANT: Only extract if the article is SPECIFICALLY ANNOUNCING a recent funding round.
+Return null if:
+- The article is NOT about a startup funding round announcement
+- The article merely MENTIONS a company or its past funding (e.g., "Company X, which raised $50M last year...")
+- The article is about acquisitions, partnerships, product launches, or general company news
+- The funding is a public offering (IPO, SPAC, direct listing, secondary offering)
+
+Only include PRIVATE funding rounds that are being announced as news in this article.
 Categorize growth rounds as "etc." for the funding_round field.
 ```
 

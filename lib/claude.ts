@@ -24,11 +24,17 @@ const MAX_TOKENS = 1024;
 /**
  * System prompt for funding extraction
  */
-const SYSTEM_PROMPT = `You are a precise data extraction assistant. Your job is to extract funding information from news articles about startup funding rounds.
+const SYSTEM_PROMPT = `You are a precise data extraction assistant. Your job is to extract funding information from news articles that are SPECIFICALLY ANNOUNCING a recent startup funding round.
 
 You must respond with ONLY valid JSON, no other text or explanation.
 
-If the article is about a startup funding round, extract the data and return:
+IMPORTANT: Only extract if the article is ANNOUNCING a new funding round. Return null if:
+- The article merely MENTIONS a company or its past funding (e.g., "Company X, which raised $50M last year...")
+- The article is about acquisitions, partnerships, product launches, layoffs, or general company news
+- The funding is a public offering (IPO, SPAC, direct listing, secondary offering, public offering)
+- The article is a roundup that references old funding news
+
+If the article IS announcing a recent private funding round, extract the data and return:
 {
   "company_name": string,
   "funding_amount": number | null,
@@ -42,13 +48,13 @@ If the article is about a startup funding round, extract the data and return:
 Rules:
 - company_name: The name of the startup that received funding
 - funding_amount: The amount in USD as a number (e.g., 50000000 for $50M). Use null if undisclosed
-- funding_round: The round type (e.g., "Seed", "Series A", "Series B", etc.). Use null if not mentioned
+- funding_round: The round type (e.g., "Seed", "Series A", "Series B", etc.). Use null if not mentioned. Categorize growth rounds as "etc."
 - investors: Array of investor names, with lead investor first if known
 - lead_investor: The lead investor name, or null if not specified
 - product_description: A brief 1-2 sentence description of what the company does
 - industry: The company's industry/sector (e.g., "AI", "Healthcare", "Fintech"). Use null if unclear
 
-If the article is NOT about a startup funding round, respond with exactly: null
+If the article is NOT specifically announcing a new funding round, respond with exactly: null
 
 Do not include any markdown formatting, code blocks, or explanations. Just the JSON or null.`;
 
