@@ -7,6 +7,10 @@ on:
     - cron: '0 14 * * *'
   workflow_dispatch: # Allow manual trigger from GitHub UI
 
+env:
+  SCRAPE_URL: https://startup-funding-tracker.vercel.app/api/scrape
+  DIGEST_URL: https://startup-funding-tracker.vercel.app/api/send-digest
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
@@ -14,7 +18,8 @@ jobs:
     steps:
       - name: Trigger scraper
         run: |
-          response=$(curl -s -w "\n%{http_code}" -X GET "${{ secrets.SCRAPE_URL }}" \
+          echo "Calling: $SCRAPE_URL"
+          response=$(curl -s -w "\n%{http_code}" -X GET "$SCRAPE_URL" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             --max-time 300)
 
@@ -36,7 +41,8 @@ jobs:
 
       - name: Trigger email digest
         run: |
-          response=$(curl -s -w "\n%{http_code}" -X GET "${{ secrets.DIGEST_URL }}" \
+          echo "Calling: $DIGEST_URL"
+          response=$(curl -s -w "\n%{http_code}" -X GET "$DIGEST_URL" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             --max-time 60)
 
