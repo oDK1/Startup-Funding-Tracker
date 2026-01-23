@@ -1,0 +1,54 @@
+name: Daily Funding Scraper
+
+on:
+  schedule:
+    # Run at 6:00 AM PST daily (14:00 UTC)
+    # Note: During PDT (Mar-Nov), this runs at 7:00 AM Pacific
+    - cron: '0 14 * * *'
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger scraper
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X GET "${{ secrets.SCRAPE_URL }}" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 300)
+
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+
+          echo "Response: $body"
+          echo "HTTP Status: $http_code"
+
+          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+            echo "Scraper completed successfully"
+          else
+            echo "Scraper failed with status $http_code"
+            exit 1
+          fi
+
+      - name: Wait before sending digest
+        run: sleep 30
+
+      - name: Trigger email digest
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X GET "${{ secrets.DIGEST_URL }}" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 60)
+
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+
+          echo "Response: $body"
+          echo "HTTP Status: $http_code"
+
+          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+            echo "Digest sent successfully"
+          else
+            echo "Digest failed with status $http_code"
+            exit 1
+          fi
