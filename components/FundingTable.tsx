@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { FundingRound } from "@/lib/types";
+import { config } from "@/lib/config";
 
 /**
  * Props for the FundingTable component
@@ -262,16 +263,22 @@ export default function FundingTable({
                 key={row.id}
                 className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
-                {/* Company Name - Links to source */}
+                {/* Company Name - Links to source (if enabled) */}
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <a
-                    href={row.source_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                  >
-                    {row.company_name}
-                  </a>
+                  {config.showSourceLinks ? (
+                    <a
+                      href={row.source_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                    >
+                      {row.company_name}
+                    </a>
+                  ) : (
+                    <span className="font-medium text-gray-900 dark:text-white">
+                      {row.company_name}
+                    </span>
+                  )}
                 </td>
 
                 {/* Funding Amount */}
