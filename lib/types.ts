@@ -74,6 +74,36 @@ export interface ScrapedArticle {
 }
 
 /**
+ * ScrapeProgress - Database model for scrape_progress table
+ * Tracks progress of batch scraping operations
+ */
+export interface ScrapeProgress {
+  id: string;
+  source: string;
+  month: number;
+  year: number;
+  status: "pending" | "in_progress" | "completed" | "failed";
+  articles_found: number;
+  articles_saved: number;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+/**
+ * ScrapeProgressInsert - Type for inserting/updating scrape progress
+ */
+export type ScrapeProgressInsert = Omit<ScrapeProgress, "id" | "created_at">;
+
+/**
+ * ScrapeProgressUpdate - Type for partial updates to scrape progress
+ */
+export type ScrapeProgressUpdate = Partial<
+  Omit<ScrapeProgress, "id" | "source" | "month" | "year" | "created_at">
+>;
+
+/**
  * Database types for Supabase
  * This provides type safety when using Supabase client
  * Follows the structure expected by @supabase/supabase-js
@@ -85,6 +115,12 @@ export interface Database {
         Row: FundingRound;
         Insert: FundingRoundInsert;
         Update: Partial<FundingRoundInsert>;
+        Relationships: [];
+      };
+      scrape_progress: {
+        Row: ScrapeProgress;
+        Insert: ScrapeProgressInsert;
+        Update: ScrapeProgressUpdate;
         Relationships: [];
       };
     };
