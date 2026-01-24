@@ -2,9 +2,8 @@ name: Daily Funding Scraper
 
 on:
   schedule:
-    # Run at 6:00 AM PST daily (14:00 UTC)
-    # Note: During PDT (Mar-Nov), this runs at 7:00 AM Pacific
-    - cron: '0 14 * * *'
+    # TEMPORARY: Testing cron scheduling (normally runs at 14:00 UTC)
+    - cron: '26 16 * * *'
   workflow_dispatch: # Allow manual trigger from GitHub UI
 
 env:
