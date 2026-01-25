@@ -2,8 +2,8 @@ name: Daily Funding Scraper
 
 on:
   schedule:
-    # TEMPORARY: Testing cron after workflow re-enable (normally runs at 14:00 UTC)
-    - cron: '20 19 * * *'
+    # Runs daily at 14:00 UTC (6am PST / 7am PDT)
+    - cron: '0 14 * * *'
   workflow_dispatch: # Allow manual trigger from GitHub UI
 
 env:
