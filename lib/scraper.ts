@@ -48,9 +48,26 @@ export const RSS_SOURCES: RSSSource[] = [
     name: "Bloomberg",
     url: "https://feeds.bloomberg.com/markets/news.rss",
   },
+  // VC-focused feeds for higher signal-to-noise ratio (verified working)
   {
-    name: "Tech Funding News",
-    url: "https://techfundingnews.com/feed/",
+    name: "PR Newswire VC",
+    url: "https://www.prnewswire.com/rss/financial-services-latest-news/venture-capital-list.rss",
+  },
+  {
+    name: "GlobeNewswire Financing",
+    url: "https://www.globenewswire.com/RssFeed/subjectcode/17-Financing%20Agreements/feedTitle/GlobeNewswire%20-%20Financing%20Agreements",
+  },
+  {
+    name: "NVCA Blog",
+    url: "https://nvca.org/feed/",
+  },
+  {
+    name: "VC Cafe",
+    url: "https://www.vccafe.com/feed/",
+  },
+  {
+    name: "Techmeme",
+    url: "https://www.techmeme.com/feed.xml",
   },
 ];
 

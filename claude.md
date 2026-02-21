@@ -1,215 +1,75 @@
-# Startup Funding Tracker - Implementation Plan
+# CLAUDE.md
 
-## Overview
-A web app that scrapes tech media daily, extracts startup funding data using Claude, displays it in a searchable table, and sends a daily email digest.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Tech Stack
-- **Frontend/Backend:** Next.js (App Router) on Vercel
-- **Database:** Supabase (PostgreSQL + RLS)
-- **Email:** Resend
-- **AI Extraction:** Claude API
-- **Styling:** Tailwind CSS
+## What This Is
+
+A Next.js app that scrapes tech RSS feeds daily, uses Claude AI to extract startup funding announcements, stores them in Supabase, and displays them in a searchable table. Automated via GitHub Actions (not Vercel cron — `vercel.json` has an empty crons array).
+
+## Commands
+
+```bash
+npm run dev      # Start local dev server
+npm run build    # Production build
+npm run lint     # ESLint
+```
+
+No tests are configured. Manual verification is done by hitting the API endpoints directly.
 
 ## Architecture
 
-```
-Vercel Cron (6am daily)
-       │
-       ▼
-┌──────────────────┐     ┌─────────────────┐
-│ /api/scrape      │────▶│ Claude API      │
-│ (fetch + extract)│     │ (extraction)    │
-└────────┬─────────┘     └─────────────────┘
-         │
-         ▼
-┌──────────────────┐     ┌─────────────────┐
-│ Supabase         │────▶│ Resend          │
-│ (store data)     │     │ (email digest)  │
-└────────┬─────────┘     └─────────────────┘
-         │
-         ▼
-┌──────────────────┐
-│ Next.js Web UI   │
-│ (table view)     │
-└──────────────────┘
-```
-
-## Data Sources (5 total)
-1. **TechCrunch** - RSS: `techcrunch.com/category/startups/feed/`
-2. **Crunchbase News** - RSS: `news.crunchbase.com/feed/`
-3. **Forbes** - RSS: `forbes.com/business/feed/`
-4. **Bloomberg** - RSS: `feeds.bloomberg.com/markets/news.rss`
-5. **Tech Funding News** - RSS: `techfundingnews.com/feed/`
-
-## Database Schema
-
-```sql
-CREATE TABLE funding_rounds (
-  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  company_name        TEXT NOT NULL,
-  funding_amount      BIGINT,           -- USD, null if undisclosed
-  funding_round       TEXT,             -- Seed, Series A, etc.
-  investors           TEXT[],           -- Array, lead investor first
-  lead_investor       TEXT,
-  product_description TEXT,
-  industry            TEXT,
-  source_url          TEXT NOT NULL,
-  source_name         TEXT,             -- Internal tracking only
-  published_at        TIMESTAMPTZ,
-  created_at          TIMESTAMPTZ DEFAULT NOW(),
-
-  UNIQUE(company_name, published_at::date)
-);
-
--- RLS: Public read, authenticated write
-CREATE POLICY "Public read" ON funding_rounds FOR SELECT USING (true);
-CREATE POLICY "Admin write" ON funding_rounds FOR ALL USING (auth.role() = 'authenticated');
-
--- Indexes
-CREATE INDEX idx_funding_amount ON funding_rounds(funding_amount DESC);
-CREATE INDEX idx_published_at ON funding_rounds(published_at DESC);
-CREATE INDEX idx_company_name ON funding_rounds(company_name);
-```
-
-## Implementation Steps
-
-### Phase 1: Project Setup
-- [ ] Initialize Next.js project with TypeScript
-- [ ] Configure Tailwind CSS
-- [ ] Set up Supabase project and create database schema
-- [ ] Set up Resend account
-- [ ] Configure environment variables (Supabase, Resend, Anthropic API keys)
-
-### Phase 2: Scraper API Route
-- [ ] Create `/api/scrape` route
-- [ ] Implement RSS fetcher for all 5 sources
-- [ ] Implement article content extractor (cheerio/readability)
-- [ ] Implement Claude extraction prompt (returns structured JSON)
-- [ ] Add deduplication logic before saving
-- [ ] Add Vercel cron config (`vercel.json`) for daily 6am run
-
-### Phase 3: Web UI
-- [ ] Create main page with table component
-- [ ] Implement sortable columns (Amount, Date, Company)
-- [ ] Implement search (company name + description)
-- [ ] Implement filter dropdowns (Round type, Industry)
-- [ ] Add click-to-expand for full investor list
-- [ ] Add "Load More" pagination
-- [ ] Link company names to source articles
-
-### Phase 4: Email Digest
-- [ ] Create `/api/send-digest` route
-- [ ] Build email template (plain text format)
-- [ ] Query today's funding rounds, sorted by amount
-- [ ] Send via Resend
-- [ ] Trigger after scrape completes (or separate cron)
-
-### Phase 5: Auth & Polish
-- [ ] Set up Supabase RLS policies (public read, admin write)
-- [ ] Add simple admin auth for manual data edits
-- [ ] Add email subscription/unsubscribe flow
-- [ ] Deploy to Vercel
-
-## File Structure
+### Data Flow
 
 ```
-/app
-  /page.tsx              # Main table UI
-  /api
-    /scrape/route.ts     # Daily scraper
-    /send-digest/route.ts # Email sender
-/lib
-  /supabase.ts           # Supabase client
-  /scraper.ts            # RSS fetch + article extraction
-  /claude.ts             # Claude extraction logic
-  /resend.ts             # Email sending
-/components
-  /FundingTable.tsx      # Main table component
-  /SearchBar.tsx
-  /Filters.tsx
-vercel.json              # Cron configuration
+GitHub Actions (daily 14:00 UTC)
+  → GET /api/scrape        (RSS feeds → Claude extraction → Supabase)
+  → GET /api/scrape-vcnews (VCNewsDaily web scraping → Supabase)
 ```
 
-## Claude Extraction Prompt
+The main scrape pipeline in `/api/scrape/route.ts`:
+1. Fetch 9 RSS feeds in parallel (`lib/scraper.ts`)
+2. For each item, check deduplication (3 levels: URL, company+date, company+amount+round)
+3. Extract full article HTML via cheerio (`extractArticleContent`)
+4. Send to Claude 3.5 Haiku for structured JSON extraction (`lib/claude.ts`)
+5. Insert into Supabase `funding_rounds` table (`lib/supabase.ts`)
 
-```
-Extract funding information from this article. Return JSON:
-{
-  "company_name": string,
-  "funding_amount": number | null,
-  "funding_round": string | null,
-  "investors": string[],
-  "lead_investor": string | null,
-  "product_description": string,
-  "industry": string | null
-}
+### Key Design Decisions
 
-IMPORTANT: Only extract if the article is SPECIFICALLY ANNOUNCING a recent funding round.
-Return null if:
-- The article is NOT about a startup funding round announcement
-- The article merely MENTIONS a company or its past funding (e.g., "Company X, which raised $50M last year...")
-- The article is about acquisitions, partnerships, product launches, or general company news
-- The funding is a public offering (IPO, SPAC, direct listing, secondary offering)
+**Two Supabase clients**: `supabase` (anon key, respects RLS) for frontend; `supabaseAdmin` (service role, bypasses RLS) for API routes. Use `getSupabaseAdmin()` in any write path.
 
-Only include PRIVATE funding rounds that are being announced as news in this article.
-Categorize growth rounds as "etc." for the funding_round field.
-```
+**Three-layer deduplication** (in order):
+1. In-batch URL deduplication (Set)
+2. Database check by source URL (`fundingRoundExistsByUrl`)
+3. Database check by company+date (`fundingRoundExists`) and company+amount+round (`fundingRoundExistsByDetails`)
 
-## Web UI - Table View
+**Claude extraction returns `null`** for non-funding articles. The prompt is strict — only primary-focus funding announcements pass (not product launches that mention funding, not cumulative funding totals, not private placements).
 
-```
-┌──────────────────────────────────────────────────────────────────────────────────────┐
-│  Startup Funding Tracker                                              [Search 🔍]    │
-├──────────────────────────────────────────────────────────────────────────────────────┤
-│  Filters: [All Rounds ▼] [All Industries ▼]                                          │
-├────────────┬──────────┬──────────┬─────────────────────┬──────────────────────┬──────┤
-│ Company ▼  │ Amount ▼ │ Round    │ Lead Investor       │ Description          │ Date │
-├────────────┼──────────┼──────────┼─────────────────────┼──────────────────────┼──────┤
-│ Acme AI    │ $50M     │ Series B │ Sequoia             │ AI code review...    │ 1/18 │
-├────────────┼──────────┼──────────┼─────────────────────┼──────────────────────┼──────┤
-│ HealthFlow │ $25M     │ Series A │ Andreessen Horowitz │ Healthcare billing...│ 1/18 │
-└────────────┴──────────┴──────────┴─────────────────────┴──────────────────────┴──────┘
-```
+**`scrape_progress` table** tracks VCNewsDaily batch scraping by month/year with `pending|in_progress|completed|failed` status.
 
-- Click column headers to sort
-- Click company name → opens source article
-- Click lead investor → expands to show all investors
-- Search filters by company name OR product description
+### File Map
 
-## Email Digest Format
+| File | Purpose |
+|------|---------|
+| `lib/types.ts` | All shared TypeScript interfaces (`FundingRound`, `ExtractedFunding`, `RSSItem`, `ScrapeProgress`) |
+| `lib/scraper.ts` | RSS feed fetching + cheerio article extraction |
+| `lib/claude.ts` | Claude 3.5 Haiku integration, extraction prompt, response parsing |
+| `lib/supabase.ts` | Both Supabase clients, all DB operations, deduplication helpers, `normalizeCompanyName` |
+| `lib/config.ts` | Feature flags (`showSourceLinks` from `NEXT_PUBLIC_SHOW_SOURCE_LINKS`) |
+| `lib/resend.ts` | Email sending via Resend |
+| `app/api/scrape/route.ts` | Main daily scraper endpoint |
+| `app/api/scrape-vcnews/route.ts` | VCNewsDaily single-month scraper |
+| `app/api/scrape-vcnews-batch/route.ts` | VCNewsDaily multi-month batch scraper |
+| `app/api/scrape-historical/route.ts` | Historical data backfill |
+| `app/api/send-digest/route.ts` | Email digest sender (currently disabled in cron) |
+| `app/page.tsx` | Main UI with table, search, filters |
+| `.github/workflows/scrape.yml` | GitHub Actions cron job (runs daily at 14:00 UTC) |
 
-```
-Subject: Funding Digest - Jan 18, 2025 (12 rounds, $847M total)
+### Authorization
 
-────────────────────────────────────────────────────
+API routes check for `CRON_SECRET` env var. If unset, all requests are allowed (dev mode). Production requests from GitHub Actions pass `Authorization: Bearer $CRON_SECRET`.
 
-STARTUP FUNDING DIGEST
-January 18, 2025
+## Environment Variables
 
-────────────────────────────────────────────────────
-
-$50M   │ Acme AI │ Series B │ Sequoia
-         AI-powered code review for enterprises
-         → https://techcrunch.com/...
-
-$25M   │ HealthFlow │ Series A │ a16z
-         Healthcare billing automation
-         → https://forbes.com/...
-
-────────────────────────────────────────────────────
-
-View all: https://your-app.vercel.app
-
-────────────────────────────────────────────────────
-```
-
-## Verification Plan
-1. **Scraper:** Manually trigger `/api/scrape`, check Supabase for new rows
-2. **UI:** Load web page, verify sorting/searching/filtering works
-3. **Email:** Trigger `/api/send-digest`, verify email received with correct data
-4. **Cron:** Check Vercel logs next day to confirm automatic run
-
-## Environment Variables Needed
 ```
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
@@ -217,4 +77,44 @@ SUPABASE_SERVICE_ROLE_KEY=
 ANTHROPIC_API_KEY=
 RESEND_API_KEY=
 DIGEST_EMAIL_TO=
+NEXT_PUBLIC_SHOW_SOURCE_LINKS=true   # false hides source article links
+CRON_SECRET=                          # If unset, auth is disabled
 ```
+
+## Database Schema (Supabase)
+
+```sql
+-- Main table
+funding_rounds (
+  id UUID PK, company_name TEXT NOT NULL, funding_amount BIGINT,
+  funding_round TEXT, investors TEXT[], lead_investor TEXT,
+  product_description TEXT, industry TEXT, source_url TEXT NOT NULL,
+  source_name TEXT, published_at TIMESTAMPTZ, created_at TIMESTAMPTZ,
+  UNIQUE(company_name, published_at::date)
+)
+
+-- Batch scraping progress
+scrape_progress (
+  id UUID PK, source TEXT, month INT, year INT,
+  status TEXT, articles_found INT, articles_saved INT,
+  error_message TEXT, started_at TIMESTAMPTZ, completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ, UNIQUE(source, month, year)
+)
+```
+
+RLS: Public read on `funding_rounds`. All writes use the service role key.
+
+## Triggering Scrapers Manually
+
+```bash
+# RSS scraper (no auth in dev)
+curl http://localhost:3000/api/scrape
+
+# VCNewsDaily for a specific month
+curl "http://localhost:3000/api/scrape-vcnews?month=1&year=2025"
+
+# Production with auth
+curl -H "Authorization: Bearer $CRON_SECRET" https://startup-funding-tracker.vercel.app/api/scrape
+```
+
+The email digest is intentionally disabled in the GitHub Actions workflow (commented out). To re-enable, uncomment the digest step in `.github/workflows/scrape.yml`.
