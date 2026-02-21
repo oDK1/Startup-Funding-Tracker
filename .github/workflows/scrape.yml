@@ -2,12 +2,13 @@ name: Daily Funding Scraper
 
 on:
   schedule:
-    # Runs daily at 14:00 UTC (6am PST / 7am PDT)
-    - cron: '0 14 * * *'
+    # Runs every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
+    - cron: '0 */6 * * *'
   workflow_dispatch: # Allow manual trigger from GitHub UI
 
 env:
   SCRAPE_URL: https://startup-funding-tracker.vercel.app/api/scrape
+  VCNEWS_URL: https://startup-funding-tracker.vercel.app/api/scrape-vcnews
   DIGEST_URL: https://startup-funding-tracker.vercel.app/api/send-digest
 
 jobs:
@@ -15,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Trigger scraper
+      - name: Trigger RSS scraper
         run: |
           echo "Calling: $SCRAPE_URL"
           response=$(curl -s -w "\n%{http_code}" -X GET "$SCRAPE_URL" \
@@ -29,10 +30,36 @@ jobs:
           echo "HTTP Status: $http_code"
 
           if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-            echo "Scraper completed successfully"
+            echo "RSS scraper completed successfully"
           else
-            echo "Scraper failed with status $http_code"
+            echo "RSS scraper failed with status $http_code"
             exit 1
+          fi
+
+      - name: Trigger VCNewsDaily scraper
+        run: |
+          # Get current month and year
+          CURRENT_MONTH=$(date +%-m)
+          CURRENT_YEAR=$(date +%Y)
+          VCNEWS_FULL_URL="${VCNEWS_URL}?month=${CURRENT_MONTH}&year=${CURRENT_YEAR}"
+
+          echo "Calling: $VCNEWS_FULL_URL"
+          response=$(curl -s -w "\n%{http_code}" -X GET "$VCNEWS_FULL_URL" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 300)
+
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+
+          echo "Response: $body"
+          echo "HTTP Status: $http_code"
+
+          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+            echo "VCNewsDaily scraper completed successfully"
+          else
+            echo "VCNewsDaily scraper failed with status $http_code"
+            # Don't fail the workflow if VCNewsDaily fails - RSS scraper already succeeded
+            echo "Warning: VCNewsDaily scraper failed but continuing"
           fi
 
       # Uncomment below to enable email digest
