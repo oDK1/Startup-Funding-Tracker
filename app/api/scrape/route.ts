@@ -3,6 +3,9 @@ import { fetchAllRSSFeeds, extractArticleContent } from "@/lib/scraper";
 import { extractFundingData } from "@/lib/claude";
 import {
   fundingRoundExists,
+  fundingRoundExistsByUrl,
+  fundingRoundExistsByDetails,
+  normalizeCompanyName,
   insertFundingRound,
   type FundingRoundInsert,
 } from "@/lib/supabase";
@@ -20,14 +23,17 @@ import {
  */
 
 // Maximum number of items to process per run to avoid timeouts
-// Reduced to 10 for Vercel Free tier (60s timeout): 10 items × ~4s = ~40s
-const MAX_ITEMS_PER_RUN = 10;
+// Vercel Hobby: 10s limit. URL-deduped items take ~50ms; new items take ~4-5s.
+// 50 items covers a full RSS batch; fast URL checks handle most on repeat runs.
+const MAX_ITEMS_PER_RUN = 50;
 
-// Maximum function execution time before stopping (leave buffer for Vercel's 60s limit)
-const FUNCTION_TIMEOUT_MS = 55000;
+// Maximum function execution time before stopping
+// Return at 8s, before Vercel kills at 10s
+const FUNCTION_TIMEOUT_MS = 8000;
 
 // Delay between processing items to avoid rate limits (in ms)
-const PROCESSING_DELAY = 500;
+// No delay — every ms counts at 10s limit
+const PROCESSING_DELAY = 0;
 
 /**
  * Result tracking for the scrape operation
@@ -137,6 +143,10 @@ export async function GET(request: NextRequest) {
     const itemsToProcess = rssItems.slice(0, MAX_ITEMS_PER_RUN);
     console.log(`[Scrape] Processing ${itemsToProcess.length} items (max: ${MAX_ITEMS_PER_RUN})`);
 
+    // Track processed items within this batch to avoid in-batch duplicates
+    const processedUrls = new Set<string>();
+    const processedCompanies = new Set<string>(); // normalized company names
+
     // Step 2: Process each item
     let stoppedEarly = false;
     for (const item of itemsToProcess) {
@@ -157,41 +167,83 @@ export async function GET(request: NextRequest) {
           continue;
         }
 
+        // Step 2a: Check for URL duplicate (in-batch)
+        if (processedUrls.has(item.link)) {
+          console.log(`[Scrape] Skipping in-batch URL duplicate: ${item.link}`);
+          result.skippedDuplicate++;
+          continue;
+        }
+
+        // Step 2b: Check for URL duplicate (in database)
+        const urlExists = await fundingRoundExistsByUrl(item.link);
+        if (urlExists) {
+          console.log(`[Scrape] Skipping - URL already in database: ${item.link}`);
+          result.skippedDuplicate++;
+          processedUrls.add(item.link);
+          continue;
+        }
+
         console.log(`[Scrape] Processing: ${item.title}`);
 
-        // Step 2a: Extract article content first (needed for Claude extraction)
-        // We extract content before dedup check because we need company name
-        // from Claude to do proper deduplication
+        // Step 2c: Extract article content (needed for Claude extraction)
         const articleContent = await extractArticleContent(item.link);
 
         if (!articleContent || articleContent.length < 100) {
           console.log(`[Scrape] Skipping - insufficient content: ${item.link}`);
           result.skippedNotFunding++;
+          processedUrls.add(item.link);
           continue;
         }
 
-        // Step 2b: Use Claude to extract funding data
+        // Step 2d: Use Claude to extract funding data
         const fundingData = await extractFundingData(articleContent);
 
         if (!fundingData) {
           console.log(`[Scrape] Not a funding article: ${item.title}`);
           result.skippedNotFunding++;
+          processedUrls.add(item.link);
           continue;
         }
 
-        // Step 2c: Check for duplicates (now that we have company name)
-        const exists = await fundingRoundExists(
+        // Step 2e: Check for company duplicate (in-batch)
+        const normalizedCompany = normalizeCompanyName(fundingData.company_name);
+        if (processedCompanies.has(normalizedCompany)) {
+          console.log(`[Scrape] Skipping in-batch company duplicate: ${fundingData.company_name}`);
+          result.skippedDuplicate++;
+          processedUrls.add(item.link);
+          continue;
+        }
+
+        // Step 2f: Check for duplicates in database (company + date)
+        const existsByDate = await fundingRoundExists(
           fundingData.company_name,
           item.pubDate
         );
 
-        if (exists) {
-          console.log(`[Scrape] Duplicate found: ${fundingData.company_name}`);
+        if (existsByDate) {
+          console.log(`[Scrape] Duplicate found (company+date): ${fundingData.company_name}`);
           result.skippedDuplicate++;
+          processedUrls.add(item.link);
+          processedCompanies.add(normalizedCompany);
           continue;
         }
 
-        // Step 2d: Prepare data for insertion
+        // Step 2g: Check for duplicates by company + amount + round (within 7 days)
+        const existsByDetails = await fundingRoundExistsByDetails(
+          fundingData.company_name,
+          fundingData.funding_amount,
+          fundingData.funding_round
+        );
+
+        if (existsByDetails) {
+          console.log(`[Scrape] Duplicate found (company+amount+round): ${fundingData.company_name}`);
+          result.skippedDuplicate++;
+          processedUrls.add(item.link);
+          processedCompanies.add(normalizedCompany);
+          continue;
+        }
+
+        // Step 2h: Prepare data for insertion
         const fundingRound: FundingRoundInsert = {
           company_name: fundingData.company_name,
           funding_amount: fundingData.funding_amount,
@@ -205,8 +257,12 @@ export async function GET(request: NextRequest) {
           published_at: item.pubDate ? new Date(item.pubDate).toISOString() : null,
         };
 
-        // Step 2e: Insert into Supabase
+        // Step 2i: Insert into Supabase
         await insertFundingRound(fundingRound);
+
+        // Track as processed to prevent in-batch duplicates
+        processedUrls.add(item.link);
+        processedCompanies.add(normalizedCompany);
 
         console.log(`[Scrape] Added: ${fundingData.company_name} (${formatAmount(fundingData.funding_amount)})`);
         result.newItemsAdded++;

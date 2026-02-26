@@ -231,14 +231,109 @@ export async function insertFundingRound(
 }
 
 /**
+ * Normalize company name for comparison
+ * - Trims whitespace
+ * - Converts to lowercase
+ * - Removes common suffixes (Inc, LLC, Ltd, etc.)
+ */
+export function normalizeCompanyName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/,?\s*(inc\.?|llc\.?|ltd\.?|corp\.?|corporation|company|co\.?)$/i, "")
+    .trim();
+}
+
+/**
+ * Check if a funding round already exists by source URL
+ */
+export async function fundingRoundExistsByUrl(
+  sourceUrl: string
+): Promise<boolean> {
+  const client = getSupabaseClient();
+
+  const { data, error } = await client
+    .from("funding_rounds")
+    .select("id")
+    .eq("source_url", sourceUrl)
+    .limit(1);
+
+  if (error) {
+    console.error("Error checking for existing funding round by URL:", error);
+    return false;
+  }
+
+  return (data?.length || 0) > 0;
+}
+
+/**
+ * Check if a funding round already exists by company + amount + round within 7 days
+ */
+export async function fundingRoundExistsByDetails(
+  companyName: string,
+  fundingAmount: number | null,
+  fundingRound: string | null
+): Promise<boolean> {
+  const client = getSupabaseClient();
+  const normalizedName = normalizeCompanyName(companyName);
+
+  // Look for same company within last 7 days
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+  let query = client
+    .from("funding_rounds")
+    .select("id, company_name, funding_amount, funding_round")
+    .gte("created_at", sevenDaysAgo.toISOString());
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("Error checking for existing funding round by details:", error);
+    return false;
+  }
+
+  if (!data || data.length === 0) {
+    return false;
+  }
+
+  // Check for matches with normalized company name
+  for (const row of data) {
+    const rowNormalizedName = normalizeCompanyName(row.company_name);
+    if (rowNormalizedName !== normalizedName) {
+      continue;
+    }
+
+    // Same company found within 7 days - check if same funding round
+    // If amount and round match, it's a duplicate
+    if (fundingAmount !== null && row.funding_amount === fundingAmount) {
+      if (!fundingRound || !row.funding_round || row.funding_round === fundingRound) {
+        return true;
+      }
+    }
+
+    // If no amount but same round type, likely duplicate
+    if (fundingAmount === null && row.funding_amount === null) {
+      if (fundingRound && row.funding_round === fundingRound) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
  * Helper function to check if a funding round already exists
  * Used for deduplication based on company_name and published_at date
+ * Uses case-insensitive matching with normalized company names
  */
 export async function fundingRoundExists(
   companyName: string,
   publishedAt: string | null
 ): Promise<boolean> {
   const client = getSupabaseClient();
+  const normalizedName = normalizeCompanyName(companyName);
 
   if (!publishedAt) {
     // If no published date, check by company name only (within last 24 hours)
@@ -247,36 +342,38 @@ export async function fundingRoundExists(
 
     const { data, error } = await client
       .from("funding_rounds")
-      .select("id")
-      .eq("company_name", companyName)
-      .gte("created_at", yesterday.toISOString())
-      .limit(1);
+      .select("id, company_name")
+      .gte("created_at", yesterday.toISOString());
 
     if (error) {
       console.error("Error checking for existing funding round:", error);
       return false;
     }
 
-    return (data?.length || 0) > 0;
+    // Check with normalized names
+    return (data || []).some(
+      (row) => normalizeCompanyName(row.company_name) === normalizedName
+    );
   }
 
-  // Check by company name and published date
+  // Check by company name and published date (same day)
   const publishedDate = new Date(publishedAt).toISOString().split("T")[0];
 
   const { data, error } = await client
     .from("funding_rounds")
-    .select("id")
-    .eq("company_name", companyName)
+    .select("id, company_name")
     .gte("published_at", `${publishedDate}T00:00:00Z`)
-    .lt("published_at", `${publishedDate}T23:59:59Z`)
-    .limit(1);
+    .lt("published_at", `${publishedDate}T23:59:59Z`);
 
   if (error) {
     console.error("Error checking for existing funding round:", error);
     return false;
   }
 
-  return (data?.length || 0) > 0;
+  // Check with normalized names
+  return (data || []).some(
+    (row) => normalizeCompanyName(row.company_name) === normalizedName
+  );
 }
 
 /**

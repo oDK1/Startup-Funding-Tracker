@@ -24,17 +24,40 @@ const MAX_TOKENS = 1024;
 /**
  * System prompt for funding extraction
  */
-const SYSTEM_PROMPT = `You are a precise data extraction assistant. Your job is to extract funding information from news articles that are SPECIFICALLY ANNOUNCING a recent startup funding round.
+const SYSTEM_PROMPT = `You are a precise data extraction assistant. Your job is to extract funding information from news articles where the PRIMARY PURPOSE is to announce a NEW, DISCRETE startup funding round.
 
 You must respond with ONLY valid JSON, no other text or explanation.
 
-IMPORTANT: Only extract if the article is ANNOUNCING a new funding round. Return null if:
+CRITICAL: Only extract if the article's PRIMARY FOCUS is announcing a SPECIFIC NEW funding round.
+
+Return null if:
 - The article merely MENTIONS a company or its past funding (e.g., "Company X, which raised $50M last year...")
+- The article mentions AGGREGATE or CUMULATIVE funding to date (e.g., "has raised $100M to date", "total funding reaches $50M", "bringing total raised to $200M")
+- The funding amount refers to total capital raised over multiple rounds, not a single new round
 - The article is about acquisitions, partnerships, product launches, layoffs, or general company news
 - The funding is a public offering (IPO, SPAC, direct listing, secondary offering, public offering)
+- The funding is a PRIVATE PLACEMENT (PIPE, registered direct offering, or similar public company financings)
 - The article is a roundup that references old funding news
+- The article discusses funding plans or intentions without confirming a closed round
 
-If the article IS announcing a recent private funding round, extract the data and return:
+IMPORTANT - PRIMARY FOCUS TEST:
+The article's MAIN TOPIC must be the funding announcement itself. Return null if:
+- The article is primarily about a PRODUCT LAUNCH but mentions funding as context
+- The article is primarily about a company ACHIEVEMENT or MILESTONE but mentions funding
+- The article is primarily about HIRING, EXPANSION, or PARTNERSHIPS but mentions funding
+- The funding information appears only in the background/context of another story
+- The headline or first paragraph focuses on something OTHER than the funding round
+
+Ask yourself: "Is this article's main news the funding round, or is funding just mentioned as supporting context?"
+If funding is secondary/contextual, return null.
+
+ONLY extract when:
+- The article's PRIMARY PURPOSE is to announce the funding round
+- A specific round is being announced (Seed, Series A, Series B, etc.)
+- OR a specific new investment amount being raised in a single transaction
+- The funding is the MAIN NEWS, not background information
+
+If the article IS announcing a recent private venture funding round, extract the data and return:
 {
   "company_name": string,
   "funding_amount": number | null,
@@ -47,7 +70,7 @@ If the article IS announcing a recent private funding round, extract the data an
 
 Rules:
 - company_name: The name of the startup that received funding
-- funding_amount: The amount in USD as a number (e.g., 50000000 for $50M). Use null if undisclosed
+- funding_amount: The amount in USD as a number (e.g., 50000000 for $50M). Use null if undisclosed. MUST be the amount for THIS SPECIFIC ROUND, not cumulative/total funding.
 - funding_round: The round type (e.g., "Seed", "Series A", "Series B", etc.). Use null if not mentioned. Categorize growth rounds as "etc."
 - investors: Array of investor names, with lead investor first if known
 - lead_investor: The lead investor name, or null if not specified
