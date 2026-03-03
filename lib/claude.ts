@@ -16,7 +16,7 @@ export type { ExtractedFunding };
 const anthropic = new Anthropic();
 
 // Model to use for extraction (fast and cost-effective)
-const MODEL = "claude-3-5-haiku-latest";
+const MODEL = "claude-haiku-4-5-20251001";
 
 // Maximum tokens for response
 const MAX_TOKENS = 1024;
@@ -24,38 +24,26 @@ const MAX_TOKENS = 1024;
 /**
  * System prompt for funding extraction
  */
-const SYSTEM_PROMPT = `You are a precise data extraction assistant. Your job is to extract funding information from news articles where the PRIMARY PURPOSE is to announce a NEW, DISCRETE startup funding round.
+const SYSTEM_PROMPT = `You are a precise data extraction assistant. Your job is to extract funding information from news articles that mention a specific new startup funding round.
 
 You must respond with ONLY valid JSON, no other text or explanation.
 
-CRITICAL: Only extract if the article's PRIMARY FOCUS is announcing a SPECIFIC NEW funding round.
-
 Return null if:
-- The article merely MENTIONS a company or its past funding (e.g., "Company X, which raised $50M last year...")
+- The article merely MENTIONS a company's past funding as background detail (e.g., "Company X, which raised $50M last year, today launched...")
 - The article mentions AGGREGATE or CUMULATIVE funding to date (e.g., "has raised $100M to date", "total funding reaches $50M", "bringing total raised to $200M")
 - The funding amount refers to total capital raised over multiple rounds, not a single new round
-- The article is about acquisitions, partnerships, product launches, layoffs, or general company news
 - The funding is a public offering (IPO, SPAC, direct listing, secondary offering, public offering)
 - The funding is a PRIVATE PLACEMENT (PIPE, registered direct offering, or similar public company financings)
 - The article is a roundup that references old funding news
 - The article discusses funding plans or intentions without confirming a closed round
-
-IMPORTANT - PRIMARY FOCUS TEST:
-The article's MAIN TOPIC must be the funding announcement itself. Return null if:
-- The article is primarily about a PRODUCT LAUNCH but mentions funding as context
-- The article is primarily about a company ACHIEVEMENT or MILESTONE but mentions funding
-- The article is primarily about HIRING, EXPANSION, or PARTNERSHIPS but mentions funding
-- The funding information appears only in the background/context of another story
-- The headline or first paragraph focuses on something OTHER than the funding round
-
-Ask yourself: "Is this article's main news the funding round, or is funding just mentioned as supporting context?"
-If funding is secondary/contextual, return null.
+- Acquisitions, partnerships, product launches, layoffs, or general company news with NO funding component
 
 ONLY extract when:
-- The article's PRIMARY PURPOSE is to announce the funding round
-- A specific round is being announced (Seed, Series A, Series B, etc.)
-- OR a specific new investment amount being raised in a single transaction
-- The funding is the MAIN NEWS, not background information
+- The article mentions a SPECIFIC NEW funding round (Seed, Series A, Series B, etc.)
+  OR a specific new investment amount raised in a single transaction
+- The company name and funding are clearly identifiable
+- Extract even if the article also announces a product launch, acquisition, expansion, or milestone
+  alongside the funding — as long as a specific new round is present
 
 If the article IS announcing a recent private venture funding round, extract the data and return:
 {
@@ -137,7 +125,12 @@ export async function extractFundingData(
       return null;
     }
 
-    const responseText = textBlock.text.trim();
+    // Strip markdown code fences if Claude wrapped the response (e.g. ```json ... ```)
+    const rawText = textBlock.text.trim();
+    const responseText = rawText
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/, "")
+      .trim();
 
     // Check if Claude determined this is not a funding article
     if (responseText === "null" || responseText.toLowerCase() === "null") {
@@ -186,7 +179,7 @@ export async function extractFundingData(
       console.error(
         `Anthropic API error: ${error.status} - ${error.message}`
       );
-      return null;
+      throw error; // propagate so caller counts it as an error, not a non-funding skip
     }
 
     // Log unexpected errors
